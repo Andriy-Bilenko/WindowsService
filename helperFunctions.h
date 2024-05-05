@@ -1,6 +1,10 @@
 #pragma once
+
 #include <Windows.h>
 #include <string>
+#include <ctime>
+#include <fstream>
+#include <iostream>
 
 // function that appends text to logFileName file
 void log(const std::string& logFileName, const std::string& text);
@@ -12,4 +16,4 @@ std::string get_current_time();
 void writePrompt();
 
 // function to convert from inconvenient WinAPI PWSTR to std::string
-std::string PWSTRToStdString(PWSTR input);
+std::string PWSTRToStdString(const PWSTR input);

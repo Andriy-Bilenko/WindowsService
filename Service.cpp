@@ -1,95 +1,54 @@
-#pragma region Includes
-#include <iostream>
-#include <fstream>
-#include <ctime>
-#include <thread>
 #include "Service.h"
-#include <cpprest/http_client.h>
-#include <cpprest/filestream.h>
-#include <cpprest/uri.h>
-#include <cpprest/json.h>
-#include "ServiceManager.h"
-#include "helperFunctions.h"
-#pragma endregion
+
 
 // static variable initialization with default hardcoded values
-int Service::g_fetchingIntervalSeconds = 2;
-std::vector<std::string> Service::g_currencyCodes = { "USD" };
-std::string Service::g_logFileName = "C:\\dir\\default_logs.txt";
-std::string Service::g_dataFileName = "C:\\dir\\default_currency_data.csv";
+int Service::g_fetchingIntervalSeconds = DEFAULT_FETCHING_INTERVAL_SECONDS;
+std::string Service::g_currencyCodes = DEFAULT_CURRENCY_CODES;
+std::string Service::g_logFileName = DEFAULT_LOG_FILENAME;
+std::string Service::g_dataFileName = DEFAULT_DATA_FILENAME;
 
 // Callback function that gets triggered when registry key registered in CSampleService::monitorRegistry() changed
 // updates static config variables by reading from service registry
 VOID CALLBACK RegistryChangeCallback(PVOID hEvent, BOOLEAN fTimeout)
 {
-    std::string REGISTRY_KEY = "SYSTEM\\CurrentControlSet\\Services\\" + PWSTRToStdString(Service::GetName());
-    const char* REGISTRY_VALUE_FETCHINTERVAL = "FetchInterval";
-    const char* REGISTRY_VALUE_LOGFILE = "LogFile";
-    const char* REGISTRY_VALUE_DATAFILE = "DataFile";
-    const char* REGISTRY_VALUE_CUURENCY_CODES = "CurrencyCodes";
+    log(Service::getLogFileName(), get_current_time() + " RegistryChangeCallback(): received registry change callback.\r\n");
+    std::string REGISTRY_KEY = REGISTRY_KEY_DIR + PWSTRToStdString(Service::GetName());
 
     HKEY hKey;
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, REGISTRY_KEY.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS)
     {
         bool regQueryFailed{ false };
-        // Read FetchInterval value
+
+        // Read FetchInterval int value
         DWORD fetchingIntervalSeconds = 0;
-        DWORD dwSize = sizeof(fetchingIntervalSeconds);
-        if (ERROR_SUCCESS == RegQueryValueExA(hKey, REGISTRY_VALUE_FETCHINTERVAL, nullptr, nullptr, reinterpret_cast<LPBYTE>(&fetchingIntervalSeconds), &dwSize))
+        DWORD dwSizeFetchInterval = sizeof(fetchingIntervalSeconds);
+        if (ERROR_SUCCESS == RegQueryValueExA(hKey, REGISTRY_VALUE_FETCHINTERVAL, nullptr, nullptr, reinterpret_cast<LPBYTE>(&fetchingIntervalSeconds), &dwSizeFetchInterval))
         {
-            int fetchingIntervalSecondsInt = static_cast<int>(fetchingIntervalSeconds);
-            Service::setFetchingIntervalSeconds(fetchingIntervalSecondsInt);
+            Service::setFetchingIntervalSeconds(static_cast<int>(fetchingIntervalSeconds));
         }
         else
         {
             regQueryFailed = true;
         }
-        // Read LogFile value
-        char logFileNameStr[MAX_PATH];
-        std::string logFileName;
-        dwSize = sizeof(logFileNameStr);
-        if (ERROR_SUCCESS == RegQueryValueExA(hKey, REGISTRY_VALUE_LOGFILE, nullptr, nullptr, reinterpret_cast<LPBYTE>(logFileNameStr), &dwSize))
+        //read all other string values
+        const std::vector<std::pair<const char*, std::function<void(const std::string&)>>> registryEntries = {
+            {REGISTRY_VALUE_LOGFILE, [](const std::string& value) { Service::setLogFileName(value); }},
+            {REGISTRY_VALUE_DATAFILE, [](const std::string& value) { Service::setDataFileName(value); }},
+            {REGISTRY_VALUE_CURRENCY_CODES, [](const std::string& value) { Service::setCurrencyCodes(value); }}
+        };
+
+        for (const auto& entry : registryEntries)
         {
-            logFileName = std::string(logFileNameStr);
-            Service::setLogFileName(logFileName);
-        }
-        else
-        {
-            regQueryFailed = true;
-        }
-        // Read DataFile value
-        char dataFileNameStr[MAX_PATH];
-        std::string dataFileName;
-        dwSize = sizeof(dataFileNameStr);
-        if (ERROR_SUCCESS == RegQueryValueExA(hKey, REGISTRY_VALUE_DATAFILE, nullptr, nullptr, reinterpret_cast<LPBYTE>(dataFileNameStr), &dwSize))
-        {
-            dataFileName = std::string(dataFileNameStr);
-            Service::setDataFileName(dataFileName);
-        }
-        else
-        {
-            regQueryFailed = true;
-        }
-        // Read CurrencyCodes value
-        char currencyCodesStr[MAX_PATH];
-        std::string currencyCodes;
-        dwSize = sizeof(currencyCodesStr);
-        if (ERROR_SUCCESS == RegQueryValueExA(hKey, REGISTRY_VALUE_CUURENCY_CODES, nullptr, nullptr, reinterpret_cast<LPBYTE>(currencyCodesStr), &dwSize))
-        {
-            currencyCodes = std::string(currencyCodesStr);
-            std::vector<std::string> currencyCodesVector;
-            std::stringstream ss(currencyCodes);
-            std::string token;
-            while (std::getline(ss, token, ','))
+            char valueStr[MAX_PATH];
+            DWORD dwSize = sizeof(valueStr);
+            if (ERROR_SUCCESS == RegQueryValueExA(hKey, entry.first, nullptr, nullptr, reinterpret_cast<LPBYTE>(valueStr), &dwSize))
             {
-                token.erase(std::remove(token.begin(), token.end(), ' '), token.end()); // trimming spaces
-                currencyCodesVector.push_back(token);
+                entry.second(valueStr);
             }
-            Service::setCurrencyCodes(currencyCodesVector);
-        }
-        else
-        {
-            regQueryFailed = true;
+            else
+            {
+                regQueryFailed = true;
+            }
         }
 
         if (regQueryFailed)
@@ -105,10 +64,11 @@ VOID CALLBACK RegistryChangeCallback(PVOID hEvent, BOOLEAN fTimeout)
     }
 }
 
+
 int Service::monitorRegistry()
 {
     // Open the registry key for monitoring
-    std::string REGISTRY_KEY = "SYSTEM\\CurrentControlSet\\Services\\" + PWSTRToStdString(Service::GetName());
+    std::string REGISTRY_KEY = REGISTRY_KEY_DIR + PWSTRToStdString(Service::GetName());
     HKEY hKey;
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, REGISTRY_KEY.c_str(), 0, KEY_NOTIFY, &hKey) != ERROR_SUCCESS)
     {
@@ -174,14 +134,14 @@ void Service::fetch()
 {
     while (!m_serviceStopping)
     {
-        using namespace web;
-        using namespace web::http;
-        using namespace web::http::client;
-
         try
         {
-            http_client client(U("https://bank.gov.ua"));
-            http_response response = client.request(methods::GET, U("/NBUStatService/v1/statdirectory/exchange?json")).get();
+            using namespace web;
+            using namespace web::http;
+            using namespace web::http::client;
+
+            http_client client(NBU_HOSTNAME);
+            http_response response = client.request(methods::GET, NBU_QUERY).get();
 
             if (response.status_code() == status_codes::OK)
             {
@@ -190,10 +150,19 @@ void Service::fetch()
                         json::value jsonResponse = json::value::parse(responseBody);
                         std::string fileName = getDataFileName();
                         for (const auto& currency : jsonResponse.as_array()) {
-                            utility::string_t cc = currency.at(U("cc")).as_string();
-                            //check if we should log it
-                            std::vector<std::string> currencyCodes = getCurrencyCodes();
-                            for (std::string code : currencyCodes) {
+                            utility::string_t cc = currency.at(L"cc").as_string();
+                            //converting currecy code string to currency code vector
+                            std::string currencyCodes = getCurrencyCodes();
+                            std::vector<std::string> currencyCodesVector;
+                             std::stringstream ss(currencyCodes);
+                             std::string token;
+                             while (std::getline(ss, token, ','))
+                             {
+                                 token.erase(std::remove(token.begin(), token.end(), ' '), token.end()); // trimming spaces
+                                 currencyCodesVector.push_back(token);
+                             }
+                             //check if we should log it
+                            for (std::string code : currencyCodesVector) {
                                 if (utility::conversions::to_utf8string(cc) == code) {
                                     double rate = currency.at(U("rate")).as_double();
                                     log(fileName, get_current_time() + "," + utility::conversions::to_utf8string(cc) + "," + std::to_string(rate));
@@ -234,6 +203,8 @@ Service::Service(PWSTR pszServiceName,
     {
         throw GetLastError();
     }
+
+    log(Service::getLogFileName(), get_current_time() + " Service constructed.\r\n");
 }
 
 Service::~Service(void)
@@ -243,6 +214,7 @@ Service::~Service(void)
         CloseHandle(m_hStoppedEvent);
         m_hStoppedEvent = NULL;
     }
+    log(Service::getLogFileName(), get_current_time() + " Service deconstructed.\r\n");
 }
 
 //
@@ -277,6 +249,7 @@ void Service::OnStart(DWORD dwArgc, LPWSTR* lpszArgv)
     // Log a service start message to the Application log.
     WriteEventLogEntry(pwstrMessage,
         EVENTLOG_INFORMATION_TYPE);
+    log(Service::getLogFileName(), get_current_time() + " Service started.\r\n");
 
     std::thread thrFetch(&Service::fetch, this);
     std::thread thrRegMonitor(&Service::monitorRegistry, this);
@@ -310,6 +283,7 @@ void Service::OnStop()
     // Log a service stop message to the Application log.
     WriteEventLogEntry(pwstrMessage,
         EVENTLOG_INFORMATION_TYPE);
+    log(Service::getLogFileName(), get_current_time() + " Service stopped.\r\n");
 
     // Indicate that the service is stopping and wait for the finish of the
     // main service function (ServiceWorkerThread).
@@ -334,26 +308,26 @@ std::string& Service::getDataFileName()
 {
     return g_dataFileName;
 }
-std::vector<std::string>& Service::getCurrencyCodes()
+std::string& Service::getCurrencyCodes()
 {
     return g_currencyCodes;
 }
 
 // setters
 
-void Service::setFetchingIntervalSeconds(int& interval)
+void Service::setFetchingIntervalSeconds(const int& interval)
 {
     g_fetchingIntervalSeconds = interval;
 }
-void Service::setCurrencyCodes(std::vector<std::string>& currencyCodes)
+void Service::setCurrencyCodes(const std::string& currencyCodes)
 {
     g_currencyCodes = currencyCodes;
 }
-void Service::setLogFileName(std::string& name)
+void Service::setLogFileName(const std::string& name)
 {
     g_logFileName = name;
 }
-void Service::setDataFileName(std::string& name)
+void Service::setDataFileName(const std::string& name)
 {
     g_dataFileName = name;
 }

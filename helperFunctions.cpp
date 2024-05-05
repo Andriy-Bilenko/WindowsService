@@ -1,7 +1,4 @@
 #include "helperFunctions.h"
-#include <ctime>
-#include <fstream>
-#include <iostream>
 
 void log(const std::string& logFileName, const std::string& text)
 {
@@ -44,7 +41,7 @@ void writePrompt()
     std::cout << " --load {filename.ini}   to update service by loading configurations from a file.\r\n";
 }
 
-std::string PWSTRToStdString(PWSTR input) {
+std::string PWSTRToStdString(const PWSTR input) {
     std::wstring wstr = std::wstring(input);
     return std::string(wstr.begin(), wstr.end());
 }

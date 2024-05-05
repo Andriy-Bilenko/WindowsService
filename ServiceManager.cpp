@@ -1,10 +1,4 @@
 #include "ServiceManager.h"
-#include <iostream>
-#include <string>
-#include <sstream>
-#include <vector>
-#include "Service.h"
-#include "helperFunctions.h"
 
 int ServiceManager::registerServiceWithSCM(PWSTR pszServiceName)
 {
@@ -73,14 +67,10 @@ int ServiceManager::installService(PWSTR pszServiceName,
     CloseServiceHandle(schService);
 
     // write default configuration to the registry:
-    std::string logFileName = "C:\\dir\\default_logs.txt";
-    std::string dataFileName = "C:\\dir\\default_currency_data.csv";
-    int fetchingIntervalSeconds{ 2 };
-    std::string currencyCodes = { "USD" };
-    std::string serviceName = PWSTRToStdString(pszServiceName);
-    writeToRegistry(fetchingIntervalSeconds, logFileName, dataFileName, currencyCodes, serviceName);
-
-    return 0;
+    std::string defaultLogFileName = DEFAULT_LOG_FILENAME;
+    std::string defaultDataFileName = DEFAULT_DATA_FILENAME;
+    std::string defaultCurrencyCodes = DEFAULT_CURRENCY_CODES;
+    return writeToRegistry(DEFAULT_FETCHING_INTERVAL_SECONDS, defaultLogFileName, defaultDataFileName, defaultCurrencyCodes, PWSTRToStdString(pszServiceName));
 }
 
 int ServiceManager::removeService(PWSTR pszServiceName)
@@ -231,46 +221,36 @@ int ServiceManager::loadConfigsFromFile(PWSTR pszServiceName, PWSTR iniFileName)
     int fetchingIntervalSeconds{};
     parseIni(fetchingIntervalSeconds, logFileName, dataFileName, currencyCodes, iniFileName);
     // write to registry
-    std::string serviceName = PWSTRToStdString(pszServiceName);
-    return writeToRegistry(fetchingIntervalSeconds, logFileName, dataFileName, currencyCodes, serviceName);
+    return writeToRegistry(fetchingIntervalSeconds, logFileName, dataFileName, currencyCodes, PWSTRToStdString(pszServiceName));
 }
 
 int ServiceManager::writeToRegistry(const int& fetchingIntervalSeconds, const std::string& logFileName, const std::string& dataFileName, const std::string& currencyCodes, const std::string& serviceName)
 {
-    std::string REGISTRY_KEY = "SYSTEM\\CurrentControlSet\\Services\\" + serviceName;
-    const char* REGISTRY_VALUE_FETCHINTERVAL = "FetchInterval";
-    const char* REGISTRY_VALUE_LOGFILE = "LogFile";
-    const char* REGISTRY_VALUE_DATAFILE = "DataFile";
-    const char* REGISTRY_VALUE_CUURENCY_CODES = "CurrencyCodes";
-
+    std::string REGISTRY_KEY = REGISTRY_KEY_DIR + serviceName;
     HKEY hKey;
     DWORD disposition;
+
     if (RegCreateKeyExA(HKEY_LOCAL_MACHINE, REGISTRY_KEY.c_str(), 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, &disposition) == ERROR_SUCCESS)
     {
-        bool settingValueFailed{ false };
+
+        bool settingValueFailed = false;
         LONG result;
-        result = RegSetValueExA(hKey, REGISTRY_VALUE_FETCHINTERVAL, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&fetchingIntervalSeconds), sizeof(DWORD));
-        if (result != ERROR_SUCCESS)
-        {
-            settingValueFailed = true;
+
+        const std::vector<std::pair<std::string, const BYTE*>> registryValues = {
+            {REGISTRY_VALUE_FETCHINTERVAL, reinterpret_cast<const BYTE*>(&fetchingIntervalSeconds)},
+            {REGISTRY_VALUE_LOGFILE, reinterpret_cast<const BYTE*>(logFileName.c_str())},
+            {REGISTRY_VALUE_DATAFILE, reinterpret_cast<const BYTE*>(dataFileName.c_str())},
+            {REGISTRY_VALUE_CURRENCY_CODES, reinterpret_cast<const BYTE*>(currencyCodes.c_str())}
+        };
+
+        for (const auto& value : registryValues) {
+            result = RegSetValueExA(hKey, value.first.c_str(), 0, REG_SZ, value.second, static_cast<DWORD>(strlen(reinterpret_cast<const char*>(value.second)) + 1));
+            if (result != ERROR_SUCCESS) {
+                settingValueFailed = true;
+            }
         }
-        result = RegSetValueExA(hKey, REGISTRY_VALUE_LOGFILE, 0, REG_SZ, reinterpret_cast<const BYTE*>(logFileName.c_str()), static_cast<DWORD>(logFileName.size() + 1));
-        if (result != ERROR_SUCCESS)
-        {
-            settingValueFailed = true;
-        }
-        result = RegSetValueExA(hKey, REGISTRY_VALUE_DATAFILE, 0, REG_SZ, reinterpret_cast<const BYTE*>(dataFileName.c_str()), static_cast<DWORD>(dataFileName.size() + 1));
-        if (result != ERROR_SUCCESS)
-        {
-            settingValueFailed = true;
-        }
-        result = RegSetValueExA(hKey, REGISTRY_VALUE_CUURENCY_CODES, 0, REG_SZ, reinterpret_cast<const BYTE*>(currencyCodes.c_str()), static_cast<DWORD>(currencyCodes.size() + 1));
-        if (result != ERROR_SUCCESS)
-        {
-            settingValueFailed = true;
-        }
-        if (settingValueFailed)
-        {
+
+        if (settingValueFailed) {
             std::cerr << "WriteToRegistry(): Setting registry value failed w/err " << GetLastError() << "\r\n";
             return -1;
         }
@@ -287,16 +267,18 @@ int ServiceManager::writeToRegistry(const int& fetchingIntervalSeconds, const st
 
 void ServiceManager::parseIni(int& fetchingIntervalSeconds, std::string& logFileName, std::string& dataFileName, std::string& currencyCodes, PWSTR iniFileName)
 {
-    wchar_t logFile[256];
-    wchar_t dataFile[256];
-    wchar_t wcharCurrencyCodes[256];
-    fetchingIntervalSeconds =
-        GetPrivateProfileInt(L"Settings", L"fetchingIntervalSeconds", 1, iniFileName);
-    GetPrivateProfileString(L"Settings", L"logFile", L"C:\\dir\\default_logs.txt", logFile, 256, iniFileName);
-    GetPrivateProfileString(L"Settings", L"dataFile", L"C:\\dir\\default_currency_data.csv", dataFile, 256, iniFileName);
-    GetPrivateProfileString(L"Settings", L"currencyCodes", L"USD", wcharCurrencyCodes, 256, iniFileName);
+    const int MAX_STRING_LENGTH = 256;
+    char logFile[MAX_STRING_LENGTH];
+    char dataFile[MAX_STRING_LENGTH];
+    char charCurrencyCodes[MAX_STRING_LENGTH];
 
-    logFileName.assign(logFile, logFile + wcslen(logFile));
-    dataFileName.assign(dataFile, dataFile + wcslen(dataFile));
-    currencyCodes.assign(wcharCurrencyCodes, wcharCurrencyCodes + wcslen(wcharCurrencyCodes));
+    fetchingIntervalSeconds =
+        GetPrivateProfileIntA(SECTION_SETTINGS, REGISTRY_VALUE_FETCHINTERVAL, DEFAULT_FETCHING_INTERVAL_SECONDS, PWSTRToStdString(iniFileName).c_str());
+    GetPrivateProfileStringA(SECTION_SETTINGS, REGISTRY_VALUE_LOGFILE, DEFAULT_LOG_FILENAME, logFile, MAX_STRING_LENGTH, PWSTRToStdString(iniFileName).c_str());
+    GetPrivateProfileStringA(SECTION_SETTINGS, REGISTRY_VALUE_DATAFILE, DEFAULT_DATA_FILENAME, dataFile, MAX_STRING_LENGTH, PWSTRToStdString(iniFileName).c_str());
+    GetPrivateProfileStringA(SECTION_SETTINGS, REGISTRY_VALUE_CURRENCY_CODES, DEFAULT_CURRENCY_CODES, charCurrencyCodes, MAX_STRING_LENGTH, PWSTRToStdString(iniFileName).c_str());
+
+    logFileName = logFile;
+    dataFileName = dataFile;
+    currencyCodes = charCurrencyCodes;
 }

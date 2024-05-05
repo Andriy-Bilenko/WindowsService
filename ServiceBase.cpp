@@ -1,7 +1,5 @@
 #pragma region Includes
 #include "ServiceBase.h"
-#include <assert.h>
-#include <strsafe.h>
 #pragma endregion
 
 #pragma region Static Members
