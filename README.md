@@ -37,6 +37,8 @@ CppRestSdk from https://github.com/microsoft/cpprestsdk, a Windows-native C++ RE
 
 Compile project with Microsoft Visual Studio, otherwise make sure to include `cpprest_2_10.dll` to the directory with `Service.exe`.
 
+IMPORTANT: if error says `InstallService(): OpenSCManager failed w/err 5` that means you cannot run service unless you're admin. Run it from admin terminal.
+
 ## when encountering errors
 
 When service malfunctions pay close attention to error codes, either in terminal right after you ran some `Service.exe` command from the listed above, or to those in service logs. Service logs are located in `C:\dir\default_logs.txt` by default (create dir folder to see), you can specify logs file by loading a new `config.ini`.
