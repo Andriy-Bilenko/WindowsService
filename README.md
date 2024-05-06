@@ -35,6 +35,8 @@ for example configuration file see `example_config.ini`
 
 CppRestSdk from https://github.com/microsoft/cpprestsdk, a Windows-native C++ REST SDK developed by Microsoft for modern asynchronous C++ API design and calls.
 
+Compile project with Microsoft Visual Studio, otherwise make sure to include `cpprest_2_10.dll` to the directory with `Service.exe`.
+
 ## when encountering errors
 
 When service malfunctions pay close attention to error codes, either in terminal right after you ran some `Service.exe` command from the listed above, or to those in service logs. Service logs are located in `C:\dir\default_logs.txt` by default (create dir folder to see), you can specify logs file by loading a new `config.ini`.
