@@ -1,4 +1,4 @@
-# Windows service application
+# Currency Fetcher Service
 
 Windows service application in C++ to fetch currency rates using data from the National Bank of Ukraine (NBU) API
 
@@ -71,3 +71,13 @@ When service malfunctions pay close attention to error codes, either in terminal
   make sure you have `cpprest_2_10.dll` in the same folder as `Service.exe`.
 
 Google the error code number if nothing helps.
+
+
+If you ran into some issues by any chance or need to contact the developer, it would be great to recieve your valuable feedback on email: *bilenko.a.uni@gmail.com*.
+
+<div align="right">
+<table><td>
+<a href="#start-of-content">↥ Scroll to top</a>
+</td></table>
+</div>
+
